@@ -130,16 +130,20 @@ async function askLLM(history, currentMessage, systemPrompt) {
     { role: 'user', content: currentMessage }
   ];
 
-  // 1. OpenAI
-  if (OPENAI_API_KEY && OPENAI_API_KEY.startsWith('sk-')) {
+  // 1. OpenAI or Groq (Free & Fast Alternative)
+  if (OPENAI_API_KEY && (OPENAI_API_KEY.startsWith('sk-') || OPENAI_API_KEY.startsWith('gsk_'))) {
     try {
-      const res = await axios.post('https://api.openai.com/v1/chat/completions', {
-        model: 'gpt-3.5-turbo',
+      const isGroq = OPENAI_API_KEY.startsWith('gsk_');
+      const url = isGroq ? 'https://api.groq.com/openai/v1/chat/completions' : 'https://api.openai.com/v1/chat/completions';
+      const modelToUse = isGroq ? 'llama3-8b-8192' : 'gpt-3.5-turbo';
+
+      const res = await axios.post(url, {
+        model: modelToUse,
         messages: messages.map(m => ({ role: m.role, content: m.content })),
         temperature: 0.7
       }, { headers: { 'Authorization': `Bearer ${OPENAI_API_KEY}` }, timeout: 10000 });
       return res.data.choices[0].message.content;
-    } catch (err) { console.error('OpenAI Error:', err.message); }
+    } catch (err) { console.error('OpenAI/Groq Error:', err.message); }
   }
 
   // 2. Gemini (try 1.5-flash then pro)
