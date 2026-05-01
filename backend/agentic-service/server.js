@@ -13,7 +13,9 @@ const CENTRAL_API_TOKEN = process.env.CENTRAL_API_TOKEN;
 const ANALYTICS_URL = process.env.ANALYTICS_SERVICE_URL || 'http://analytics-service:8003';
 const RENTAL_URL = process.env.RENTAL_SERVICE_URL || 'http://rental-service:8002';
 const ANALYTICS_GRPC_URL = process.env.ANALYTICS_GRPC_URL || 'analytics-service:50051';
+
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
 // ── gRPC Client (B1) ────────────────────────────────────────────────────────
 const PROTO_PATH = path.join(__dirname, '..', 'protos', 'analytics.proto');
@@ -60,22 +62,6 @@ mongoose.connect(MONGO_URI)
   .then(() => console.log('Connected to MongoDB'))
   .catch(err => console.error('MongoDB connection error:', err.message));
 
-// ── Gemini LLM ──────────────────────────────────────────────────────────────
-let genAI = null;
-let model = null;
-try {
-  if (GEMINI_API_KEY && GEMINI_API_KEY !== 'your_gemini_api_key_here') {
-    const { GoogleGenerativeAI } = require('@google/generative-ai');
-    genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
-    model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' }); // Use 1.5 flash for better compatibility
-    console.log('Gemini AI initialized');
-  } else {
-    console.log('No Gemini API key configured — chatbot will use fallback responses');
-  }
-} catch (err) {
-  console.error('Failed to initialize Gemini:', err.message);
-}
-
 // ── Topic guard keywords (P15) ──────────────────────────────────────────────
 const RENTPI_KEYWORDS = [
   'rental', 'rent', 'product', 'category', 'price', 'discount',
@@ -83,15 +69,13 @@ const RENTPI_KEYWORDS = [
   'booking', 'gear', 'surge', 'peak', 'trending', 'recommend',
   'electronics', 'furniture', 'vehicles', 'tools', 'outdoor',
   'sports', 'music', 'cameras', 'office', 'busy', 'free',
-  'streak', 'history', 'user', 'security', 'score', 'season',
+  'streak', 'history', 'user', 'security', 'score', 'season', 'gaming'
 ];
 
 function isOnTopic(message) {
   const lower = message.toLowerCase().trim();
-  // Allow basic greetings and pleasantries
-  const greetings = ['hello', 'hi', 'hey', 'greetings', 'morning', 'afternoon', 'evening', 'help', 'who are you', 'how are you', 'what can you do'];
-  if (greetings.some(g => lower === g || lower.startsWith(g + ' ') || lower.startsWith(g + '?') || lower.startsWith(g + '!'))) return true;
-  
+  const greetings = ['hello', 'hi', 'hey', 'help', 'who are you', 'how are you'];
+  if (greetings.some(g => lower.startsWith(g))) return true;
   return RENTPI_KEYWORDS.some(kw => lower.includes(kw));
 }
 
@@ -101,167 +85,138 @@ async function groundData(message) {
   let contexts = [];
 
   try {
-    // 1. Most rented category
-    if (lower.includes('category') && (lower.includes('most') || lower.includes('popular') || lower.includes('stats'))) {
-      try {
-        const data = await axios.get(`${ANALYTICS_URL}/analytics/category-stats`, { timeout: 10000 });
-        contexts.push(`Category rental stats: ${JSON.stringify(data.data?.data)}`);
-      } catch {
-        const data = await axios.get(`${CENTRAL_API_URL}/api/data/rentals/stats`, {
-          headers: { Authorization: `Bearer ${CENTRAL_API_TOKEN}` },
-          params: { group_by: 'category' },
-          timeout: 10000
-        });
-        contexts.push(`Category rental stats: ${JSON.stringify(data.data?.data)}`);
-      }
+    if (lower.includes('category') || lower.includes('most rented')) {
+      const data = await axios.get(`${ANALYTICS_URL}/analytics/category-stats`, { timeout: 5000 }).catch(() => null);
+      if (data?.data?.data) contexts.push(`Category Stats: ${JSON.stringify(data.data.data)}`);
     } 
 
-    // 2. Product availability
     if (lower.includes('available') || lower.includes('availability')) {
       const idMatch = message.match(/\d+/);
-      const dateMatch = message.match(/\d{4}-\d{2}-\d{2}/g);
-      if (idMatch && dateMatch && dateMatch.length >= 2) {
-        try {
-          const res = await axios.get(`${RENTAL_URL}/rentals/products/${idMatch[0]}/availability`, {
-            params: { from: dateMatch[0], to: dateMatch[1] },
-            timeout: 10000
-          });
-          contexts.push(`Availability for product ${idMatch[0]}: ${JSON.stringify(res.data)}`);
-        } catch { contexts.push(`Availability data for product ${idMatch[0]} is currently unavailable.`); }
+      if (idMatch) {
+        const res = await axios.get(`${RENTAL_URL}/rentals/products/${idMatch[0]}/availability`, {
+          params: { from: '2024-03-01', to: '2024-03-31' }, // Default range
+          timeout: 5000
+        }).catch(() => null);
+        if (res?.data) contexts.push(`Product ${idMatch[0]} Availability: ${JSON.stringify(res.data)}`);
       }
     } 
 
-    // 3. Trending / Recommendations (gRPC B1)
-    if (lower.includes('trending') || lower.includes('recommend') || lower.includes('season') || lower.includes('suggest')) {
+    if (lower.includes('trending') || lower.includes('recommend')) {
       const today = new Date().toISOString().split('T')[0];
-      try {
-        const data = await getRecommendationsGrpc(today, 5);
-        contexts.push(`Today's trending/recommended products: ${JSON.stringify(data.recommendations)}`);
-      } catch (err) {
-        contexts.push('Trending recommendations are currently unavailable.');
-      }
-    } 
-
-    // 4. Peak rental period
-    if (lower.includes('peak') || lower.includes('busiest') || lower.includes('rush')) {
-      try {
-        const data = await axios.get(`${ANALYTICS_URL}/analytics/peak-window`, { params: { from: '2024-01', to: '2024-06' }, timeout: 10000 });
-        contexts.push(`Peak rental window: ${JSON.stringify(data.data?.peakWindow)}`);
-      } catch { contexts.push('Peak window data is currently unavailable.'); }
+      const data = await getRecommendationsGrpc(today, 5).catch(() => null);
+      if (data?.recommendations) contexts.push(`Trending Products: ${JSON.stringify(data.recommendations)}`);
     }
 
-    // 5. Surge Days
-    if (lower.includes('surge') || lower.includes('spike') || lower.includes('busy days')) {
-      const monthMatch = message.match(/\d{4}-\d{2}/);
-      const month = monthMatch ? monthMatch[0] : '2024-03';
-      try {
-        const data = await axios.get(`${ANALYTICS_URL}/analytics/surge-days`, { params: { month }, timeout: 10000 });
-        contexts.push(`Surge days for ${month}: ${JSON.stringify(data.data?.data?.slice(0, 10))}`);
-      } catch { contexts.push(`Surge data for ${month} is currently unavailable.`); }
-    } 
+    if (lower.includes('peak') || lower.includes('busiest')) {
+      const data = await axios.get(`${ANALYTICS_URL}/analytics/peak-window`, { params: { from: '2024-01', to: '2024-06' }, timeout: 5000 }).catch(() => null);
+      if (data?.data?.peakWindow) contexts.push(`Peak Window: ${JSON.stringify(data.data.peakWindow)}`);
+    }
 
-    // 6. Discounts
-    if (lower.includes('discount') || lower.includes('score') || lower.includes('cheap')) {
-      contexts.push('Loyalty Discounts: 80-100 Score → 20%, 60-79 → 15%, 40-59 → 10%, 20-39 → 5%, 0-19 → 0%.');
+    if (lower.includes('discount') || lower.includes('loyalty')) {
+      contexts.push('RentPi Loyalty Program: Score 0-19: 0%, 20-39: 5%, 40-59: 10%, 60-79: 15%, 80-100: 20%. Score depends on rental history.');
     }
   } catch (err) {
     console.error('Grounding error:', err.message);
   }
   
-  return contexts.join('\n---\n');
+  return contexts.join('\n\n');
 }
 
+// ── Multi-Provider LLM Wrapper ───────────────────────────────────────────────
 async function askLLM(history, currentMessage, systemPrompt) {
-  if (!model) return 'I apologize, but the AI service is not configured.';
+  const messages = [
+    { role: 'system', content: systemPrompt },
+    ...history.map(m => ({ role: m.role === 'user' ? 'user' : 'assistant', content: m.content })),
+    { role: 'user', content: currentMessage }
+  ];
 
-  try {
-    const chat = model.startChat({
-      history: history.map(m => ({
-        role: m.role === 'user' ? 'user' : 'model',
-        parts: [{ text: m.content }],
-      })),
-      generationConfig: {
-        maxOutputTokens: 1000,
-        temperature: 0.8, // Add variety
-      },
-    });
-
-    const fullPrompt = `${systemPrompt}\n\nUser: ${currentMessage}`;
-    const result = await chat.sendMessage(fullPrompt);
-    return result.response.text();
-  } catch (err) {
-    console.error('LLM error:', err.message);
-    if (err.message.includes('quota')) return 'I apologize, but my AI quota has been exceeded. Please try again in a minute.';
-    return 'I encountered an issue processing your request. Please try asking again in a different way.';
+  // Try OpenAI first if available
+  if (OPENAI_API_KEY && OPENAI_API_KEY !== 'your_openai_key') {
+    try {
+      console.log('Using OpenAI API...');
+      const res = await axios.post('https://api.openai.com/v1/chat/completions', {
+        model: 'gpt-3.5-turbo',
+        messages: messages.map(m => ({ role: m.role, content: m.content })),
+        temperature: 0.7
+      }, {
+        headers: { 'Authorization': `Bearer ${OPENAI_API_KEY}` },
+        timeout: 15000
+      });
+      return res.data.choices[0].message.content;
+    } catch (err) {
+      console.error('OpenAI Error:', err.response?.data || err.message);
+    }
   }
+
+  // Fallback to Gemini via direct HTTP
+  if (GEMINI_API_KEY && GEMINI_API_KEY !== 'your_gemini_key') {
+    try {
+      console.log('Using Gemini API (Direct HTTP)...');
+      // Gemini expects a different format
+      const geminiMessages = messages.map(m => ({
+        role: m.role === 'user' ? 'user' : 'model',
+        parts: [{ text: m.content }]
+      }));
+      
+      const res = await axios.post(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`, {
+        contents: geminiMessages,
+        generationConfig: { temperature: 0.7, maxOutputTokens: 800 }
+      }, { timeout: 15000 });
+      
+      return res.data.candidates[0].content.parts[0].text;
+    } catch (err) {
+      console.error('Gemini Error:', err.response?.data || err.message);
+    }
+  }
+
+  // Final fallback: Rules-based mock bot
+  return `I'm currently in offline mode (LLM API keys missing or failing). I'm RentPi's assistant and I can help you with rental data. ${isOnTopic(currentMessage) ? "I see you're asking about a RentPi topic! Please check our catalog or analytics page for details." : "Please ask something related to rentals."}`;
 }
 
 async function generateSessionName(firstMessage) {
-  if (!model) return firstMessage.slice(0, 30);
   try {
-    const result = await model.generateContent(
-      `Given this first user message, reply with ONLY a short 3-5 word title for this conversation. No punctuation.\n\nMessage: "${firstMessage}"`
-    );
-    return result.response.text().trim();
+    const title = await askLLM([], `Generate a 3-5 word title for a conversation starting with: "${firstMessage}". Reply ONLY with the title.`, "You are a title generator.");
+    return title.replace(/[".!]/g, '').trim();
   } catch {
     return firstMessage.slice(0, 30);
   }
 }
 
-// ── P1: Health check ────────────────────────────────────────────────────────
-app.get('/status', (req, res) => {
-  res.json({ service: 'agentic-service', status: 'OK' });
-});
+// ── Endpoints ───────────────────────────────────────────────────────────────
+app.get('/status', (req, res) => res.json({ service: 'agentic-service', status: 'OK' }));
 
-// ── P15 + P16: Chat endpoint ────────────────────────────────────────────────
 app.post('/chat', async (req, res) => {
   try {
     const { sessionId, message } = req.body;
     if (!sessionId || !message) return res.status(400).json({ error: 'sessionId and message are required' });
 
-    // P15: Topic guard
     if (!isOnTopic(message)) {
-      const reply = "I'm RentPi's assistant and I can only help with rental-related topics. Could you please ask something about our products, categories, or pricing?";
-      await Message.create({ sessionId, role: 'user', content: message });
-      await Message.create({ sessionId, role: 'assistant', content: reply });
-      let session = await Session.findOne({ sessionId });
-      if (!session) {
-        const name = await generateSessionName(message);
-        session = await Session.create({ sessionId, name });
-      }
-      session.lastMessageAt = new Date();
-      await session.save();
-      return res.json({ sessionId, reply });
+      return res.json({ sessionId, reply: "I can only answer questions related to RentPi (rentals, products, categories, pricing). How can I help you with those?" });
     }
 
-    // P15: Data grounding
     const context = await groundData(message);
+    const history = await Message.find({ sessionId }).sort({ timestamp: 1 }).limit(10).lean();
 
-    // P16: Load history
-    const history = await Message.find({ sessionId }).sort({ timestamp: 1 }).lean();
-
-    const systemPrompt = `You are RentPi's helpful assistant. 
-Answer questions based ONLY on the provided data. Be natural, concise, and helpful.
-If the user greets you, greet them back warmly.
-If data is missing for a specific technical query, admit it politely.
-
-Relevant RentPi Data:
-${context || 'No specific technical data found for this query.'}`;
+    const systemPrompt = `You are RentPi's helpful AI assistant.
+Use the following data to answer the user's question accurately.
+If data is not available, say so politely.
+Data Context:
+${context || 'No specific technical data available for this query.'}`;
 
     const reply = await askLLM(history, message, systemPrompt);
 
-    // Save messages
+    // Save to DB
     await Message.create({ sessionId, role: 'user', content: message });
     await Message.create({ sessionId, role: 'assistant', content: reply });
 
-    // Handle session
     let session = await Session.findOne({ sessionId });
     if (!session) {
       const name = await generateSessionName(message);
       session = await Session.create({ sessionId, name });
+    } else {
+      session.lastMessageAt = new Date();
+      await session.save();
     }
-    session.lastMessageAt = new Date();
-    await session.save();
 
     res.json({ sessionId, reply });
   } catch (err) {
@@ -270,59 +225,24 @@ ${context || 'No specific technical data found for this query.'}`;
   }
 });
 
-// ── P16: List sessions ──────────────────────────────────────────────────────
 app.get('/chat/sessions', async (req, res) => {
-  try {
-    const sessions = await Session.find().sort({ lastMessageAt: -1 }).lean();
-    res.json({
-      sessions: sessions.map(s => ({
-        sessionId: s.sessionId,
-        name: s.name,
-        lastMessageAt: s.lastMessageAt,
-      })),
-    });
-  } catch (err) {
-    console.error('Sessions error:', err.message);
-    res.status(500).json({ error: 'Internal server error' });
-  }
+  const sessions = await Session.find().sort({ lastMessageAt: -1 }).lean();
+  res.json({ sessions });
 });
 
-// ── P16: Get session history ────────────────────────────────────────────────
 app.get('/chat/:sessionId/history', async (req, res) => {
-  try {
-    const { sessionId } = req.params;
-    const session = await Session.findOne({ sessionId }).lean();
-    if (!session) return res.status(404).json({ error: 'Session not found' });
-
-    const messages = await Message.find({ sessionId }).sort({ timestamp: 1 }).lean();
-    res.json({
-      sessionId,
-      name: session.name,
-      messages: messages.map(m => ({
-        role: m.role,
-        content: m.content,
-        timestamp: m.timestamp,
-      })),
-    });
-  } catch (err) {
-    console.error('History error:', err.message);
-    res.status(500).json({ error: 'Internal server error' });
-  }
+  const { sessionId } = req.params;
+  const session = await Session.findOne({ sessionId }).lean();
+  if (!session) return res.status(404).json({ error: 'Session not found' });
+  const messages = await Message.find({ sessionId }).sort({ timestamp: 1 }).lean();
+  res.json({ sessionId, name: session.name, messages });
 });
 
-// ── P16: Delete session ─────────────────────────────────────────────────────
 app.delete('/chat/:sessionId', async (req, res) => {
-  try {
-    const { sessionId } = req.params;
-    await Session.deleteOne({ sessionId });
-    await Message.deleteMany({ sessionId });
-    res.json({ success: true });
-  } catch (err) {
-    console.error('Delete error:', err.message);
-    res.status(500).json({ error: 'Internal server error' });
-  }
+  const { sessionId } = req.params;
+  await Session.deleteOne({ sessionId });
+  await Message.deleteMany({ sessionId });
+  res.json({ success: true });
 });
 
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`Agentic Service running on port ${PORT}`);
-});
+app.listen(PORT, '0.0.0.0', () => console.log(`Agentic Service running on port ${PORT}`));

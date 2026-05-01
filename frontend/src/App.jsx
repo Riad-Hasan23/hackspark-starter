@@ -208,8 +208,13 @@ function ProductDetail() {
           <div style={{ background: 'var(--bg-secondary)', padding: '1.5rem', borderRadius: 'var(--radius)' }}>
             <h4 style={{ marginBottom: '0.8rem' }}>Ownership</h4>
             <p style={{ fontSize: '0.9rem', color: 'var(--text-secondary)' }}>Listed by User: <strong>#{product.ownerId}</strong></p>
-            <div style={{ marginTop: '2rem' }}>
-              <Link to={`/availability?productId=${id}`} className="btn btn-primary" style={{ width: '100%', justifyContent: 'center' }}>Check Availability →</Link>
+            <div style={{ marginTop: '2rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+              <button className="btn btn-primary" style={{ justifyContent: 'center' }} onClick={() => alert('🚀 Booking Simulation Successful!\n\nNote: The Central API is read-only, so this rental has been simulated for demonstration purposes.')}>
+                ⚡ Rent Now
+              </button>
+              <Link to={`/availability?productId=${id}`} className="btn btn-sm btn-ghost" style={{ justifyContent: 'center' }}>
+                📅 View Availability
+              </Link>
             </div>
           </div>
         </div>
