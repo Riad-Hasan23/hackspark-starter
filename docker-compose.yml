@@ -151,6 +151,7 @@ services:
       CENTRAL_API_URL:       ${CENTRAL_API_URL}
       CENTRAL_API_TOKEN:     ${CENTRAL_API_TOKEN}
       GEMINI_API_KEY:        ${GEMINI_API_KEY:-}
+      OPENAI_API_KEY:        ${OPENAI_API_KEY:-}
       ANALYTICS_SERVICE_URL: http://analytics-service:8003
       RENTAL_SERVICE_URL:    http://rental-service:8002
     depends_on:

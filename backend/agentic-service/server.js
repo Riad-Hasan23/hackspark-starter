@@ -148,10 +148,16 @@ async function askLLM(history, currentMessage, systemPrompt) {
 
   // 2. Gemini (try 1.5-flash then pro)
   if (GEMINI_API_KEY && GEMINI_API_KEY.startsWith('AIza')) {
-    const geminiMessages = messages.map(m => ({
-      role: m.role === 'user' ? 'user' : 'model',
-      parts: [{ text: m.content }]
-    }));
+    const geminiMessages = [
+      ...history.map(m => ({
+        role: m.role === 'user' ? 'user' : 'model',
+        parts: [{ text: m.content }]
+      })),
+      {
+        role: 'user',
+        parts: [{ text: `[System Instructions]\n${systemPrompt}\n\n[User Query]\n${currentMessage}` }]
+      }
+    ];
 
     for (const modelName of ['gemini-1.5-flash', 'gemini-pro']) {
       try {
