@@ -78,6 +78,16 @@ app.get('/status', (req, res) => {
   res.json({ service: 'analytics-service', status: 'OK' });
 });
 
+// ── P15 Grounding: Category Stats ──────────────────────────────────────────
+app.get('/analytics/category-stats', async (req, res) => {
+  try {
+    const data = await centralGet('/api/data/rentals/stats', { group_by: 'category' });
+    res.json(data);
+  } catch (err) {
+    handleCentralError(err, res);
+  }
+});
+
 // ── P11: Peak 7-Day Window (Sliding Window — O(n)) ─────────────────────────
 app.get('/analytics/peak-window', async (req, res) => {
   try {

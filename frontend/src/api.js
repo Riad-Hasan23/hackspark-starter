@@ -25,4 +25,5 @@ export const api = {
   chatHistory: (id) => request(`/chat/${id}/history`),
   chatSend: (sessionId, message) => request('/chat', { method: 'POST', body: JSON.stringify({ sessionId, message }) }),
   chatDelete: (id) => request(`/chat/${id}`, { method: 'DELETE' }),
+  getCategories: () => request('/rentals/categories'),
 };

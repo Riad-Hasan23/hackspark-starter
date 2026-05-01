@@ -117,6 +117,28 @@ app.get('/rentals/products/:id', async (req, res) => {
   }
 });
 
+// ── Batch Products Proxy ───────────────────────────────────────────────────
+app.get('/rentals/products/batch', async (req, res) => {
+  try {
+    const { ids } = req.query;
+    if (!ids) return res.status(400).json({ error: 'ids query param required' });
+    const data = await centralGet('/api/data/products/batch', { ids });
+    res.json(data);
+  } catch (err) {
+    handleCentralError(err, res);
+  }
+});
+
+// ── Categories Proxy ───────────────────────────────────────────────────────
+app.get('/rentals/categories', async (req, res) => {
+  try {
+    const categories = await getCategories();
+    res.json({ categories });
+  } catch (err) {
+    handleCentralError(err, res);
+  }
+});
+
 // ── P7: Is It Available? (Interval merging) ─────────────────────────────────
 async function handleAvailability(req, res) {
   try {

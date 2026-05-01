@@ -188,7 +188,6 @@ a:hover { color: var(--accent); }
   color: var(--accent); font-weight: 700; font-size: 1.15rem; margin-top: 0.5rem;
   display: flex; align-items: baseline; gap: 0.3rem;
 }
-.price::before { content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
 
 .score { color: var(--warning); font-weight: 600; font-size: 0.9rem; }
 

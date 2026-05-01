@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { BrowserRouter, Routes, Route, Link, Navigate, useNavigate, useLocation } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Link, Navigate, useNavigate, useLocation, useParams, useSearchParams } from 'react-router-dom';
 import { api } from './api';
 
 /* ── Auth Context ──────────────────────────────────────────────────────────── */
@@ -22,7 +22,7 @@ function AuthProvider({ children }) {
   return <AuthCtx.Provider value={{ user, token, login, logout }}>{children}</AuthCtx.Provider>;
 }
 
-/* ── Skeleton Loader ───────────────────────────────────────────────────────── */
+/* ── UI Components ─────────────────────────────────────────────────────────── */
 function Skeleton({ count = 3 }) {
   return (
     <div className="skeleton-wrap">
@@ -30,6 +30,12 @@ function Skeleton({ count = 3 }) {
     </div>
   );
 }
+
+const CATEGORY_ICONS = {
+  ELECTRONICS: '💻', FURNITURE: '🪑', VEHICLES: '🚗', TOOLS: '🔧',
+  OUTDOOR: '⛺', SPORTS: '⚽', MUSIC: '🎵', CAMERAS: '📷',
+  OFFICE: '📎', KITCHEN: '🍳', GAMING: '🎮', GARDEN: '🌿',
+};
 
 /* ── Navbar ────────────────────────────────────────────────────────────────── */
 function Navbar() {
@@ -41,8 +47,9 @@ function Navbar() {
     <nav className="navbar">
       <Link to="/" className="nav-brand">⚡ RentPi</Link>
       <div className="nav-links">
-        <Link to="/products" className={isActive('/products')}>Products</Link>
+        <Link to="/products" className={isActive('/products')}>Catalog</Link>
         <Link to="/availability" className={isActive('/availability')}>Availability</Link>
+        <Link to="/deals" className={isActive('/deals')}>Deals</Link>
         <Link to="/analytics" className={isActive('/analytics')}>Analytics</Link>
         <Link to="/chat" className={isActive('/chat')}>Chat</Link>
         {user ? (
@@ -61,7 +68,9 @@ function Navbar() {
   );
 }
 
-/* ── Home / Trending Widget ────────────────────────────────────────────────── */
+/* ── Pages ─────────────────────────────────────────────────────────────────── */
+
+// 1. HOME / TRENDING
 function Home() {
   const [recs, setRecs] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -77,36 +86,27 @@ function Home() {
   };
   useEffect(fetchTrending, []);
 
-  const categoryIcons = {
-    ELECTRONICS: '💻', FURNITURE: '🪑', VEHICLES: '🚗', TOOLS: '🔧',
-    OUTDOOR: '⛺', SPORTS: '⚽', MUSIC: '🎵', CAMERAS: '📷',
-    OFFICE: '📎', KITCHEN: '🍳', GAMING: '🎮', GARDEN: '🌿',
-  };
-
   return (
     <div className="page">
       <div className="hero">
         <h1>Welcome to <span className="gradient-text">RentPi</span></h1>
-        <p>Rent anything — electronics, vehicles, tools, outdoor gear & more. Smart pricing, real-time availability.</p>
+        <p>Rent anything — from 🎮 Gaming consoles to 🚗 Vehicles. Real-time availability & smart pricing.</p>
       </div>
 
       <div className="section">
         <div className="section-header">
           <h2>🔥 Trending Today</h2>
-          <button onClick={fetchTrending} className="btn btn-sm" id="refresh-trending-btn">
-            ↻ Refresh
-          </button>
+          <button onClick={fetchTrending} className="btn btn-sm" id="refresh-trending-btn">↻ Refresh</button>
         </div>
         {loading ? <Skeleton count={6} /> : error ? <div className="error-msg">{error}</div> : (
           <div className="card-grid">
             {recs.map(r => (
-              <div key={r.productId} className="card product-card">
-                <span className="badge">{categoryIcons[r.category] || '📦'} {r.category}</span>
+              <Link to={`/products/${r.productId}`} key={r.productId} className="card product-card" style={{ textDecoration: 'none', color: 'inherit' }}>
+                <span className="badge">{CATEGORY_ICONS[r.category] || '📦'} {r.category}</span>
                 <h3>{r.name}</h3>
                 <p className="score">🏆 Score: {r.score}</p>
-              </div>
+              </Link>
             ))}
-            {recs.length === 0 && <p style={{ color: 'var(--text-muted)' }}>No trending data available yet.</p>}
           </div>
         )}
       </div>
@@ -114,91 +114,20 @@ function Home() {
   );
 }
 
-/* ── Login ─────────────────────────────────────────────────────────────────── */
-function Login() {
-  const { login: authLogin } = useAuth();
-  const nav = useNavigate();
-  const [form, setForm] = useState({ email: '', password: '' });
-  const [error, setError] = useState('');
-  const [loading, setLoading] = useState(false);
-
-  const submit = async (e) => {
-    e.preventDefault(); setLoading(true); setError('');
-    try {
-      const data = await api.login(form);
-      authLogin(data.token, data.user);
-      nav('/');
-    } catch (err) { setError(err.error || 'Login failed'); }
-    finally { setLoading(false); }
-  };
-
-  return (
-    <div className="page auth-page">
-      <form onSubmit={submit} className="auth-form">
-        <h2>Welcome Back</h2>
-        <p style={{ marginTop: '-0.5rem' }}>Sign in to your RentPi account</p>
-        {error && <div className="error-msg">{error}</div>}
-        <input id="login-email" placeholder="Email address" type="email" value={form.email}
-          onChange={e => setForm({ ...form, email: e.target.value })} required />
-        <input id="login-password" placeholder="Password" type="password" value={form.password}
-          onChange={e => setForm({ ...form, password: e.target.value })} required />
-        <button className="btn btn-primary" disabled={loading} style={{ width: '100%', justifyContent: 'center' }}>
-          {loading ? '⏳ Signing in...' : 'Sign In →'}
-        </button>
-        <p>Don't have an account? <Link to="/register">Create one</Link></p>
-      </form>
-    </div>
-  );
-}
-
-/* ── Register ──────────────────────────────────────────────────────────────── */
-function Register() {
-  const { login: authLogin } = useAuth();
-  const nav = useNavigate();
-  const [form, setForm] = useState({ name: '', email: '', password: '' });
-  const [error, setError] = useState('');
-  const [loading, setLoading] = useState(false);
-
-  const submit = async (e) => {
-    e.preventDefault(); setLoading(true); setError('');
-    try {
-      const data = await api.register(form);
-      authLogin(data.token, data.user);
-      nav('/');
-    } catch (err) { setError(err.error || 'Registration failed'); }
-    finally { setLoading(false); }
-  };
-
-  return (
-    <div className="page auth-page">
-      <form onSubmit={submit} className="auth-form">
-        <h2>Create Account</h2>
-        <p style={{ marginTop: '-0.5rem' }}>Join RentPi and start renting today</p>
-        {error && <div className="error-msg">{error}</div>}
-        <input id="register-name" placeholder="Full Name" value={form.name}
-          onChange={e => setForm({ ...form, name: e.target.value })} required />
-        <input id="register-email" placeholder="Email address" type="email" value={form.email}
-          onChange={e => setForm({ ...form, email: e.target.value })} required />
-        <input id="register-password" placeholder="Create a password" type="password" value={form.password}
-          onChange={e => setForm({ ...form, password: e.target.value })} required />
-        <button className="btn btn-primary" disabled={loading} style={{ width: '100%', justifyContent: 'center' }}>
-          {loading ? '⏳ Creating...' : 'Create Account →'}
-        </button>
-        <p>Already have an account? <Link to="/login">Sign in</Link></p>
-      </form>
-    </div>
-  );
-}
-
-/* ── Products ──────────────────────────────────────────────────────────────── */
+// 2. PRODUCT LIST (CATALOG)
 function Products() {
   const [products, setProducts] = useState([]);
+  const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(true);
   const [category, setCategory] = useState('');
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
   const [error, setError] = useState('');
   const limit = 20;
+
+  useEffect(() => {
+    api.getCategories().then(d => setCategories(d.categories || [])).catch(() => {});
+  }, []);
 
   useEffect(() => {
     setLoading(true); setError('');
@@ -210,21 +139,14 @@ function Products() {
       .finally(() => setLoading(false));
   }, [category, page]);
 
-  const categories = ['', 'ELECTRONICS', 'FURNITURE', 'VEHICLES', 'TOOLS', 'OUTDOOR', 'SPORTS', 'MUSIC', 'CAMERAS', 'OFFICE', 'KITCHEN', 'GAMING', 'GARDEN'];
-  const categoryIcons = {
-    ELECTRONICS: '💻', FURNITURE: '🪑', VEHICLES: '🚗', TOOLS: '🔧',
-    OUTDOOR: '⛺', SPORTS: '⚽', MUSIC: '🎵', CAMERAS: '📷',
-    OFFICE: '📎', KITCHEN: '🍳', GAMING: '🎮', GARDEN: '🌿',
-  };
-
   return (
     <div className="page">
-      <h1>Products</h1>
+      <h1>Catalog</h1>
       <div className="filters">
         <select id="category-filter" value={category} onChange={e => { setCategory(e.target.value); setPage(1); }}>
           <option value="">📦 All Categories</option>
-          {categories.filter(Boolean).map(c => (
-            <option key={c} value={c}>{categoryIcons[c] || ''} {c}</option>
+          {categories.map(c => (
+            <option key={c} value={c}>{CATEGORY_ICONS[c] || ''} {c}</option>
           ))}
         </select>
       </div>
@@ -232,11 +154,11 @@ function Products() {
         <>
           <div className="card-grid">
             {products.map(p => (
-              <div key={p.id} className="card product-card">
-                <span className="badge">{categoryIcons[p.category] || '📦'} {p.category}</span>
+              <Link to={`/products/${p.id}`} key={p.id} className="card product-card" style={{ textDecoration: 'none', color: 'inherit' }}>
+                <span className="badge">{CATEGORY_ICONS[p.category] || '📦'} {p.category}</span>
                 <h3>{p.name}</h3>
                 <p className="price">${p.pricePerDay}/day</p>
-              </div>
+              </Link>
             ))}
           </div>
           <div className="pagination">
@@ -250,294 +172,353 @@ function Products() {
   );
 }
 
-/* ── Availability ──────────────────────────────────────────────────────────── */
+// 3. PRODUCT DETAIL
+function ProductDetail() {
+  const { id } = useParams();
+  const [product, setProduct] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    setLoading(true);
+    api.product(id)
+      .then(setProduct)
+      .catch(() => setError('Product not found'))
+      .finally(() => setLoading(false));
+  }, [id]);
+
+  if (loading) return <div className="page"><Skeleton count={1} /></div>;
+  if (error) return <div className="page"><div className="error-msg">{error}</div></div>;
+
+  return (
+    <div className="page">
+      <div className="card" style={{ maxWidth: '800px', margin: '2rem auto' }}>
+        <span className="badge">{CATEGORY_ICONS[product.category]} {product.category}</span>
+        <h1 style={{ background: 'none', WebkitTextFillColor: 'initial', color: 'var(--text)', marginBottom: '1rem' }}>{product.name}</h1>
+        <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 0.8fr', gap: '2rem' }}>
+          <div>
+            <p style={{ color: 'var(--text-secondary)', marginBottom: '2rem' }}>
+              Experience high-quality renting with RentPi. This product belongs to the <strong>{product.category}</strong> category and is maintained by a trusted owner.
+            </p>
+            <div className="price" style={{ fontSize: '2.5rem' }}>
+              ${product.pricePerDay}
+              <span style={{ fontSize: '1rem', color: 'var(--text-muted)', fontWeight: 400 }}> / day</span>
+            </div>
+          </div>
+          <div style={{ background: 'var(--bg-secondary)', padding: '1.5rem', borderRadius: 'var(--radius)' }}>
+            <h4 style={{ marginBottom: '0.8rem' }}>Ownership</h4>
+            <p style={{ fontSize: '0.9rem', color: 'var(--text-secondary)' }}>Listed by User: <strong>#{product.ownerId}</strong></p>
+            <div style={{ marginTop: '2rem' }}>
+              <Link to={`/availability?productId=${id}`} className="btn btn-primary" style={{ width: '100%', justifyContent: 'center' }}>Check Availability →</Link>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// 4. AVAILABILITY
 function Availability() {
-  const [productId, setProductId] = useState('');
-  const [from, setFrom] = useState('');
-  const [to, setTo] = useState('');
+  const [searchParams] = useSearchParams();
+  const [productId, setProductId] = useState(searchParams.get('productId') || '');
+  const [product, setProduct] = useState(null);
+  const [range, setRange] = useState({ from: '2024-03-01', to: '2024-03-14' });
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
+  useEffect(() => {
+    if (productId && productId.length > 0) {
+      api.product(productId).then(setProduct).catch(() => setProduct(null));
+    } else {
+      setProduct(null);
+    }
+  }, [productId]);
+
   const check = async (e) => {
-    e.preventDefault(); setLoading(true); setError(''); setResult(null);
+    e.preventDefault();
+    if (!productId) return;
+    setLoading(true); setError(''); setResult(null);
     try {
-      const data = await api.availability(productId, from, to);
+      const data = await api.availability(productId, range.from, range.to);
       setResult(data);
-    } catch (err) { setError(err.error || 'Failed to check availability'); }
+    } catch (err) { setError(err.error || 'Check failed'); }
     finally { setLoading(false); }
   };
 
   return (
     <div className="page">
-      <h1>Check Availability</h1>
+      <h1>Availability Checker</h1>
       <form onSubmit={check} className="avail-form">
         <div className="form-group">
           <label>Product ID</label>
-          <input id="avail-product-id" type="number" placeholder="e.g. 42" value={productId}
-            onChange={e => setProductId(e.target.value)} required />
+          <input value={productId} onChange={e => setProductId(e.target.value)} placeholder="Enter Product ID" required />
         </div>
         <div className="form-group">
-          <label>From</label>
-          <input id="avail-from" type="date" value={from} onChange={e => setFrom(e.target.value)} required />
+          <label>Start Date</label>
+          <input type="date" value={range.from} onChange={e => setRange({ ...range, from: e.target.value })} required />
         </div>
         <div className="form-group">
-          <label>To</label>
-          <input id="avail-to" type="date" value={to} onChange={e => setTo(e.target.value)} required />
+          <label>End Date</label>
+          <input type="date" value={range.to} onChange={e => setRange({ ...range, to: e.target.value })} required />
         </div>
-        <button className="btn btn-primary" disabled={loading} style={{ alignSelf: 'flex-end' }}>
-          {loading ? '⏳ Checking...' : '🔍 Check'}
-        </button>
+        <button className="btn btn-primary" disabled={loading}>{loading ? 'Checking...' : 'Check →'}</button>
       </form>
+
+      {product && (
+        <div className="card" style={{ marginBottom: '1.5rem', background: 'var(--primary-glow)', border: '1px solid var(--primary-light)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+            <span style={{ fontSize: '2rem' }}>{CATEGORY_ICONS[product.category] || '📦'}</span>
+            <div>
+              <p style={{ fontWeight: 700, fontSize: '1.1rem' }}>{product.name}</p>
+              <p style={{ fontSize: '0.85rem', opacity: 0.8 }}>ID: #{product.id} | Category: {product.category}</p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {error && <div className="error-msg">{error}</div>}
       {result && (
         <div className="avail-result">
           <div className={`avail-status ${result.available ? 'available' : 'unavailable'}`}>
-            {result.available ? '✅ Product is Available!' : '❌ Not Available for This Period'}
+            {result.available ? '✅ This product is free to rent!' : '❌ Busy during this period'}
           </div>
-          {result.busyPeriods?.length > 0 && (
-            <div className="section">
-              <h3 style={{ marginBottom: '0.5rem' }}>Busy Periods</h3>
-              {result.busyPeriods.map((b, i) => (
-                <div key={i} className="period busy">📅 {b.start} → {b.end}</div>
-              ))}
+          <div className="analytics-grid">
+            <div className="card">
+              <h3>Occupied Dates</h3>
+              {result.busyPeriods.length > 0 ? result.busyPeriods.map((p, i) => (
+                <div key={i} className="period busy">📅 {p.start} to {p.end}</div>
+              )) : <p style={{ color: 'var(--text-muted)' }}>No conflicts found.</p>}
             </div>
-          )}
-          {result.freeWindows?.length > 0 && (
-            <div className="section">
-              <h3 style={{ marginBottom: '0.5rem' }}>Free Windows</h3>
-              {result.freeWindows.map((f, i) => (
-                <div key={i} className="period free">✅ {f.start} → {f.end}</div>
-              ))}
+            <div className="card">
+              <h3>Free Windows</h3>
+              {result.freeWindows.length > 0 ? result.freeWindows.map((p, i) => (
+                <div key={i} className="period free">✨ {p.start} to {p.end}</div>
+              )) : <p style={{ color: 'var(--text-muted)' }}>No free slots in this range.</p>}
             </div>
-          )}
+          </div>
         </div>
       )}
     </div>
   );
 }
 
-/* ── Chat ──────────────────────────────────────────────────────────────────── */
+// 5. DEALS (Discounted Products)
+function Deals() {
+  const [deals, setDeals] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const today = new Date().toISOString().split('T')[0];
+    api.recommendations(today, 12)
+      .then(d => setDeals(d.recommendations || []))
+      .finally(() => setLoading(false));
+  }, []);
+
+  return (
+    <div className="page">
+      <h1>Exclusive Deals</h1>
+      <p style={{ color: 'var(--text-secondary)', marginBottom: '2rem' }}>Unlock up to 20% OFF based on your security score.</p>
+      {loading ? <Skeleton count={6} /> : (
+        <div className="card-grid">
+          {deals.map(p => (
+            <Link to={`/products/${p.productId}`} key={p.productId} className="card product-card" style={{ border: '1px solid var(--accent-glow)' }}>
+              <span className="badge" style={{ background: 'var(--accent-glow)', color: 'var(--accent)' }}>Loyalty Discount</span>
+              <h3>{p.name}</h3>
+              <p className="score">Popularity: {p.score}</p>
+              <div className="price">SAVE ON RENTAL</div>
+            </Link>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// 6. ANALYTICS
+function Analytics() {
+  const [peak, setPeak] = useState(null);
+  const [surge, setSurge] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    Promise.all([
+      api.peakWindow('2024-01', '2024-06'),
+      api.surgeDays('2024-03')
+    ]).then(([p, s]) => { setPeak(p.peakWindow); setSurge(s.data); })
+      .finally(() => setLoading(false));
+  }, []);
+
+  return (
+    <div className="page">
+      <h1>Platform Analytics</h1>
+      {loading ? <Skeleton count={2} /> : (
+        <div className="analytics-grid">
+          <div className="card analytics-card">
+            <h2>📈 Peak Demand Period</h2>
+            <div className="big-number">{peak?.totalRentals}</div>
+            <p style={{ textAlign: 'center', color: 'var(--text-secondary)' }}>Total rentals from <strong>{peak?.from}</strong> to <strong>{peak?.to}</strong></p>
+          </div>
+          <div className="card analytics-card">
+            <h2>⚡ Next Spikes (Surge Days)</h2>
+            <div className="surge-list">
+              {surge.slice(0, 10).map((d, i) => (
+                <div key={i} className="surge-item">
+                  <span>{d.date}</span>
+                  <span className="surge-count">{d.count} rentals</span>
+                  <span className="surge-next">{d.nextSurgeDate ? `↑ Next spike in ${d.daysUntil}d` : 'Max'}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// 7. CHAT
 function Chat() {
   const [sessions, setSessions] = useState([]);
-  const [activeSession, setActiveSession] = useState(null);
+  const [currentSessionId, setCurrentSessionId] = useState('');
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
-  const [sending, setSending] = useState(false);
-  const messagesEnd = useRef(null);
+  const [loading, setLoading] = useState(false);
+  const scrollRef = useRef();
 
-  useEffect(() => { api.chatSessions().then(d => setSessions(d.sessions || [])).catch(() => {}); }, []);
-  useEffect(() => { messagesEnd.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
+  useEffect(() => {
+    api.chatSessions().then(d => setSessions(d.sessions || []));
+  }, []);
 
-  const loadSession = async (sid) => {
-    setActiveSession(sid);
-    try {
-      const data = await api.chatHistory(sid);
-      setMessages(data.messages || []);
-    } catch { setMessages([]); }
+  useEffect(() => {
+    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+  }, [messages, loading]);
+
+  const loadSession = async (id) => {
+    setCurrentSessionId(id);
+    const data = await api.chatHistory(id);
+    setMessages(data.messages || []);
   };
 
-  const newChat = () => {
-    setActiveSession(crypto.randomUUID());
+  const startNewChat = () => {
+    setCurrentSessionId(Math.random().toString(36).substring(2, 15));
     setMessages([]);
   };
 
-  const send = async () => {
-    if (!input.trim() || sending) return;
-    const sid = activeSession || crypto.randomUUID();
-    if (!activeSession) setActiveSession(sid);
-
-    const userMsg = { role: 'user', content: input, timestamp: new Date().toISOString() };
-    setMessages(m => [...m, userMsg]);
-    setInput(''); setSending(true);
-
+  const send = async (e) => {
+    e.preventDefault();
+    if (!input.trim() || loading) return;
+    const msg = input;
+    const sid = currentSessionId || Math.random().toString(36).substring(2, 15);
+    if (!currentSessionId) setCurrentSessionId(sid);
+    setInput('');
+    setMessages(prev => [...prev, { role: 'user', content: msg }]);
+    setLoading(true);
     try {
-      const data = await api.chatSend(sid, input);
-      setMessages(m => [...m, { role: 'assistant', content: data.reply, timestamp: new Date().toISOString() }]);
-      api.chatSessions().then(d => setSessions(d.sessions || [])).catch(() => {});
+      const data = await api.chatSend(sid, msg);
+      setMessages(prev => [...prev, { role: 'assistant', content: data.reply }]);
+      api.chatSessions().then(d => setSessions(d.sessions || []));
     } catch {
-      setMessages(m => [...m, { role: 'assistant', content: 'Sorry, something went wrong. Please try again.', timestamp: new Date().toISOString() }]);
-    } finally { setSending(false); }
-  };
-
-  const deleteSession = async (sid, e) => {
-    e.stopPropagation();
-    await api.chatDelete(sid);
-    setSessions(s => s.filter(x => x.sessionId !== sid));
-    if (activeSession === sid) { setActiveSession(null); setMessages([]); }
+      setMessages(prev => [...prev, { role: 'assistant', content: 'AI Service Error. Please try again later.' }]);
+    } finally { setLoading(false); }
   };
 
   return (
-    <div className="page chat-page">
+    <div className="chat-page">
       <div className="chat-sidebar">
-        <button onClick={newChat} className="btn btn-primary" id="new-chat-btn">✨ New Chat</button>
+        <button className="btn btn-primary" onClick={startNewChat}>+ New Chat</button>
         <div className="session-list">
           {sessions.map(s => (
-            <div key={s.sessionId}
-              className={`session-item ${activeSession === s.sessionId ? 'active' : ''}`}
-              onClick={() => loadSession(s.sessionId)}>
-              <span className="session-name">💬 {s.name || 'Untitled'}</span>
-              <button className="delete-btn" onClick={(e) => deleteSession(s.sessionId, e)}>×</button>
+            <div key={s.sessionId} className={`session-item ${currentSessionId === s.sessionId ? 'active' : ''}`} onClick={() => loadSession(s.sessionId)}>
+              <div className="session-name">{s.name}</div>
             </div>
           ))}
         </div>
       </div>
       <div className="chat-main">
-        <div className="messages">
-          {messages.length === 0 && (
-            <div className="empty-chat">
-              <div style={{ fontSize: '2.5rem', marginBottom: '1rem' }}>🤖</div>
-              <div>Hi! I'm RentPi's AI Assistant.</div>
-              <div style={{ fontSize: '0.9rem', marginTop: '0.5rem', color: 'var(--text-muted)' }}>
-                Ask me about products, availability, trends, or discounts.
-              </div>
-            </div>
-          )}
+        <div className="messages" ref={scrollRef}>
+          {messages.length === 0 && <div className="empty-chat">How can I help you with RentPi today?</div>}
           {messages.map((m, i) => (
             <div key={i} className={`message ${m.role}`}>
               <div className="bubble">{m.content}</div>
             </div>
           ))}
-          {sending && (
-            <div className="message assistant">
-              <div className="bubble typing">⏳ Thinking...</div>
-            </div>
-          )}
-          <div ref={messagesEnd} />
+          {loading && <div className="message assistant"><div className="bubble typing">Assistant is typing...</div></div>}
         </div>
-        <div className="chat-input">
-          <input id="chat-message-input" value={input} onChange={e => setInput(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && send()}
-            placeholder="Ask about rentals, products, trends..."
-            disabled={sending} />
-          <button onClick={send} className="btn btn-primary" disabled={sending} id="chat-send-btn">
-            {sending ? '...' : '↑'}
-          </button>
-        </div>
+        <form className="chat-input" onSubmit={send}>
+          <input placeholder="Ask about products, availability or stats..." value={input} onChange={e => setInput(e.target.value)} disabled={loading} />
+          <button className="btn btn-primary" disabled={loading}>Send</button>
+        </form>
       </div>
     </div>
   );
 }
 
-/* ── Profile ───────────────────────────────────────────────────────────────── */
+// 8. PROFILE
 function Profile() {
   const { user } = useAuth();
-  const [discountInfo, setDiscountInfo] = useState(null);
-  const [userId, setUserId] = useState('');
+  const [discount, setDiscount] = useState(null);
+
+  useEffect(() => {
+    if (user) api.discount(user.id).then(setDiscount).catch(() => {});
+  }, [user]);
+
+  if (!user) return <div className="page">Please sign in to view your profile.</div>;
+
+  return (
+    <div className="page">
+      <h1>Your Profile</h1>
+      <div className="card profile-card" style={{ marginBottom: '1.5rem' }}>
+        <h2>{user.name}</h2>
+        <p>{user.email}</p>
+        <p style={{ marginTop: '0.5rem', color: 'var(--text-muted)' }}>Member since: 2024</p>
+      </div>
+      {discount && (
+        <div className="card" style={{ border: '1px solid var(--success)' }}>
+          <h3 style={{ color: 'var(--success)' }}>🏆 Loyalty Reward</h3>
+          <div className="discount-value" style={{ margin: '1rem 0' }}>{discount.discountPercent}% OFF</div>
+          <p>Your Security Score is <strong>{discount.securityScore}</strong>. Keep it high for more savings!</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// 9. AUTH
+function Auth({ mode }) {
+  const { login: authLogin } = useAuth();
+  const navigate = useNavigate();
+  const [form, setForm] = useState({ name: '', email: '', password: '' });
+  const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const checkDiscount = async () => {
-    if (!userId) return;
-    setLoading(true);
+  const submit = async (e) => {
+    e.preventDefault(); setLoading(true); setError('');
     try {
-      const data = await api.discount(userId);
-      setDiscountInfo(data);
-    } catch { setDiscountInfo(null); }
+      const data = mode === 'login' ? await api.login(form) : await api.register(form);
+      authLogin(data.token, data.user);
+      navigate('/');
+    } catch (err) { setError(err.error || 'Auth failed'); }
     finally { setLoading(false); }
   };
 
   return (
-    <div className="page">
-      <h1>User Profile</h1>
-      {user && (
-        <div className="card profile-card">
-          <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>👤</div>
-          <h2>{user.name}</h2>
-          <p>{user.email}</p>
-        </div>
-      )}
-      <div className="section">
-        <h2 style={{ marginBottom: '1rem' }}>🏷️ Check Discount Tier</h2>
-        <div className="inline-form">
-          <input type="number" placeholder="User ID (from Central API)" value={userId}
-            onChange={e => setUserId(e.target.value)} />
-          <button className="btn btn-primary" onClick={checkDiscount} disabled={loading}>
-            {loading ? '⏳...' : '🔍 Check'}
-          </button>
-        </div>
-        {discountInfo && (
-          <div className="card discount-card">
-            <h3>User #{discountInfo.userId}</h3>
-            <p style={{ color: 'var(--text-secondary)' }}>
-              Security Score: <strong style={{ color: 'var(--text)' }}>{discountInfo.securityScore}</strong>
-            </p>
-            <p className="discount-value">{discountInfo.discountPercent}% OFF</p>
-          </div>
-        )}
-      </div>
+    <div className="page auth-page">
+      <form onSubmit={submit} className="auth-form">
+        <h2>{mode === 'login' ? 'Welcome Back' : 'Create Account'}</h2>
+        {error && <div className="error-msg">{error}</div>}
+        {mode === 'register' && <input placeholder="Full Name" value={form.name} onChange={e => setForm({...form, name: e.target.value})} required />}
+        <input type="email" placeholder="Email" value={form.email} onChange={e => setForm({...form, email: e.target.value})} required />
+        <input type="password" placeholder="Password" value={form.password} onChange={e => setForm({...form, password: e.target.value})} required />
+        <button className="btn btn-primary" disabled={loading}>{loading ? '...' : (mode === 'login' ? 'Login' : 'Sign Up')}</button>
+        <p>{mode === 'login' ? "Don't have an account?" : "Already have an account?"} <Link to={mode === 'login' ? '/register' : '/login'}>{mode === 'login' ? 'Sign up' : 'Login'}</Link></p>
+      </form>
     </div>
   );
 }
 
-/* ── Analytics Dashboard ───────────────────────────────────────────────────── */
-function Analytics() {
-  const [peakData, setPeakData] = useState(null);
-  const [surgeData, setSurgeData] = useState(null);
-  const [peakFrom, setPeakFrom] = useState('2024-01');
-  const [peakTo, setPeakTo] = useState('2024-06');
-  const [surgeMonth, setSurgeMonth] = useState('2024-03');
-  const [loading, setLoading] = useState({});
-
-  const fetchPeak = async () => {
-    setLoading(l => ({ ...l, peak: true }));
-    try { const d = await api.peakWindow(peakFrom, peakTo); setPeakData(d); } catch {}
-    finally { setLoading(l => ({ ...l, peak: false })); }
-  };
-
-  const fetchSurge = async () => {
-    setLoading(l => ({ ...l, surge: true }));
-    try { const d = await api.surgeDays(surgeMonth); setSurgeData(d); } catch {}
-    finally { setLoading(l => ({ ...l, surge: false })); }
-  };
-
-  return (
-    <div className="page">
-      <h1>Analytics Dashboard</h1>
-      <div className="analytics-grid">
-        <div className="card analytics-card">
-          <h2>🏔️ Peak 7-Day Window</h2>
-          <div className="inline-form">
-            <input type="month" value={peakFrom} onChange={e => setPeakFrom(e.target.value)} />
-            <input type="month" value={peakTo} onChange={e => setPeakTo(e.target.value)} />
-            <button className="btn btn-primary" onClick={fetchPeak} disabled={loading.peak}>
-              {loading.peak ? '⏳ Loading...' : '📊 Find Peak'}
-            </button>
-          </div>
-          {peakData?.peakWindow && (
-            <div className="peak-result">
-              <p className="big-number">{peakData.peakWindow.totalRentals}</p>
-              <p>Total rentals from {peakData.peakWindow.from} to {peakData.peakWindow.to}</p>
-            </div>
-          )}
-        </div>
-        <div className="card analytics-card">
-          <h2>⚡ Surge Days</h2>
-          <div className="inline-form">
-            <input type="month" value={surgeMonth} onChange={e => setSurgeMonth(e.target.value)} />
-            <button className="btn btn-primary" onClick={fetchSurge} disabled={loading.surge}>
-              {loading.surge ? '⏳ Loading...' : '📈 Analyze'}
-            </button>
-          </div>
-          {surgeData?.data && (
-            <div className="surge-list">
-              {surgeData.data.slice(0, 10).map((d, i) => (
-                <div key={i} className="surge-item">
-                  <span>📅 {d.date}</span>
-                  <span className="surge-count">{d.count} rentals</span>
-                  <span className="surge-next">
-                    {d.nextSurgeDate ? `Next: ${d.nextSurgeDate} (${d.daysUntil}d)` : '—'}
-                  </span>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/* ── App ───────────────────────────────────────────────────────────────────── */
+/* ── App Shell ─────────────────────────────────────────────────────────────── */
 export default function App() {
   return (
     <BrowserRouter>
@@ -545,13 +526,15 @@ export default function App() {
         <Navbar />
         <Routes>
           <Route path="/" element={<Home />} />
-          <Route path="/login" element={<Login />} />
-          <Route path="/register" element={<Register />} />
+          <Route path="/login" element={<Auth mode="login" />} />
+          <Route path="/register" element={<Auth mode="register" />} />
           <Route path="/products" element={<Products />} />
+          <Route path="/products/:id" element={<ProductDetail />} />
           <Route path="/availability" element={<Availability />} />
+          <Route path="/deals" element={<Deals />} />
+          <Route path="/analytics" element={<Analytics />} />
           <Route path="/chat" element={<Chat />} />
           <Route path="/profile" element={<Profile />} />
-          <Route path="/analytics" element={<Analytics />} />
           <Route path="*" element={<Navigate to="/" />} />
         </Routes>
       </AuthProvider>
