@@ -44,8 +44,8 @@ services:
 
   api-gateway:
     build:
-      context: ./backend/api-gateway
-      dockerfile: Dockerfile
+      context: ./backend
+      dockerfile: api-gateway/Dockerfile
     restart: unless-stopped
     ports:
       - "${GATEWAY_PORT:-8000}:8000"
@@ -74,8 +74,8 @@ services:
 
   user-service:
     build:
-      context: ./backend/user-service
-      dockerfile: Dockerfile
+      context: ./backend
+      dockerfile: user-service/Dockerfile
     restart: unless-stopped
     ports:
       - "${USER_SERVICE_PORT:-8001}:8001"
@@ -98,8 +98,8 @@ services:
 
   rental-service:
     build:
-      context: ./backend/rental-service
-      dockerfile: Dockerfile
+      context: ./backend
+      dockerfile: rental-service/Dockerfile
     restart: unless-stopped
     ports:
       - "${RENTAL_SERVICE_PORT:-8002}:8002"
@@ -121,8 +121,8 @@ services:
 
   analytics-service:
     build:
-      context: ./backend/analytics-service
-      dockerfile: Dockerfile
+      context: ./backend
+      dockerfile: analytics-service/Dockerfile
     restart: unless-stopped
     ports:
       - "${ANALYTICS_SERVICE_PORT:-8003}:8003"
@@ -140,8 +140,8 @@ services:
 
   agentic-service:
     build:
-      context: ./backend/agentic-service
-      dockerfile: Dockerfile
+      context: ./backend
+      dockerfile: agentic-service/Dockerfile
     restart: unless-stopped
     ports:
       - "${AGENTIC_SERVICE_PORT:-8004}:8004"
