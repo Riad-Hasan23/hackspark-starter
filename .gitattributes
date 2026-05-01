@@ -1,40 +1,14 @@
-# RentPi/.gitattributes
-# You can change this file according to your need and stack.
-# Enforces LF line endings for all teams regardless of OS.
-# This prevents shell scripts from breaking inside Linux Docker containers
-# when committed from Windows machines. DO NOT remove this file.
+# Enforce LF line endings for all text files
+# This is critical for Windows users developing for Linux Docker containers
 * text=auto eol=lf
 
-# Explicit overrides for critical file types
-*.sh        text eol=lf
-*.bash      text eol=lf
-Dockerfile  text eol=lf
-*.yml       text eol=lf
-*.yaml      text eol=lf
-*.json      text eol=lf
-*.env*      text eol=lf
-*.md        text eol=lf
-*.js        text eol=lf
-*.ts        text eol=lf
-*.jsx       text eol=lf
-*.tsx       text eol=lf
-*.py        text eol=lf
-*.go        text eol=lf
-*.java      text eol=lf
-*.css       text eol=lf
-*.html      text eol=lf
-*.sql       text eol=lf
-*.prisma    text eol=lf
-
-# Binary files - no line ending conversion
-*.png   binary
-*.jpg   binary
-*.jpeg  binary
-*.gif   binary
-*.ico   binary
-*.woff  binary
-*.woff2 binary
-*.ttf   binary
-*.eot   binary
-*.pdf   binary
-*.zip   binary
+# Explicitly set common web/backend files
+*.js text eol=lf
+*.json text eol=lf
+*.css text eol=lf
+*.html text eol=lf
+*.dockerignore text eol=lf
+Dockerfile text eol=lf
+docker-compose.yml text eol=lf
+.env.example text eol=lf
+.gitignore text eol=lf
