@@ -44,7 +44,7 @@ services:
 
   api-gateway:
     build:
-      context: ./api-gateway
+      context: ./backend/api-gateway
       dockerfile: Dockerfile
     restart: unless-stopped
     ports:
@@ -74,7 +74,7 @@ services:
 
   user-service:
     build:
-      context: ./user-service
+      context: ./backend/user-service
       dockerfile: Dockerfile
     restart: unless-stopped
     ports:
@@ -98,7 +98,7 @@ services:
 
   rental-service:
     build:
-      context: ./rental-service
+      context: ./backend/rental-service
       dockerfile: Dockerfile
     restart: unless-stopped
     ports:
@@ -121,7 +121,7 @@ services:
 
   analytics-service:
     build:
-      context: ./analytics-service
+      context: ./backend/analytics-service
       dockerfile: Dockerfile
     restart: unless-stopped
     ports:
@@ -140,7 +140,7 @@ services:
 
   agentic-service:
     build:
-      context: ./agentic-service
+      context: ./backend/agentic-service
       dockerfile: Dockerfile
     restart: unless-stopped
     ports:

@@ -1,5 +1,8 @@
 const express = require('express');
 const axios = require('axios');
+const grpc = require('@grpc/grpc-js');
+const protoLoader = require('@grpc/proto-loader');
+const path = require('path');
 
 const app = express();
 const PORT = process.env.PORT || 8003;
@@ -277,6 +280,89 @@ app.get('/analytics/category-stats', async (req, res) => {
   } catch (err) {
     handleCentralError(err, res);
   }
+});
+
+// ── gRPC Server (B1) ────────────────────────────────────────────────────────
+const PROTO_PATH = path.join(__dirname, '..', 'protos', 'analytics.proto');
+const packageDefinition = protoLoader.loadSync(PROTO_PATH, {
+  keepCase: true,
+  longs: String,
+  enums: String,
+  defaults: true,
+  oneofs: true,
+});
+const analyticsProto = grpc.loadPackageDefinition(packageDefinition).analytics;
+
+async function getRecommendationsInternal(date, limit) {
+  const targetDate = new Date(date);
+  if (isNaN(targetDate.getTime())) throw new Error('Invalid date');
+
+  const productScores = {};
+  const targetYear = targetDate.getFullYear();
+
+  for (let yearOffset = 1; yearOffset <= 2; yearOffset++) {
+    const refYear = targetYear - yearOffset;
+    const refDate = new Date(refYear, targetDate.getMonth(), targetDate.getDate());
+
+    const windowStart = new Date(refDate);
+    windowStart.setDate(windowStart.getDate() - 7);
+    const windowEnd = new Date(refDate);
+    windowEnd.setDate(windowEnd.getDate() + 7);
+
+    const fromStr = windowStart.toISOString().split('T')[0];
+    const toStr = windowEnd.toISOString().split('T')[0];
+
+    for (let page = 1; page <= 2; page++) {
+      const data = await centralGet('/api/data/rentals', { from: fromStr, to: toStr, page, limit: 100 });
+      if (!data.data || data.data.length === 0) break;
+      for (const r of data.data) {
+        productScores[r.productId] = (productScores[r.productId] || 0) + 1;
+      }
+      if (data.data.length < 100) break;
+    }
+  }
+
+  const sorted = Object.entries(productScores)
+    .map(([id, score]) => ({ productId: parseInt(id), score }))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit);
+
+  const productIds = sorted.map(p => p.productId);
+  const products = {};
+  for (let i = 0; i < productIds.length; i += 50) {
+    const batch = productIds.slice(i, i + 50);
+    try {
+      const data = await centralGet('/api/data/products/batch', { ids: batch.join(',') });
+      for (const p of data.data) products[p.id] = p;
+    } catch {}
+  }
+
+  return sorted.map(s => ({
+    productId: s.productId,
+    name: products[s.productId]?.name || `Product #${s.productId}`,
+    category: products[s.productId]?.category || 'UNKNOWN',
+    score: s.score,
+  }));
+}
+
+const grpcServer = new grpc.Server();
+grpcServer.addService(analyticsProto.AnalyticsService.service, {
+  GetRecommendations: async (call, callback) => {
+    try {
+      const { date, limit } = call.request;
+      const recommendations = await getRecommendationsInternal(date, limit);
+      callback(null, { date, recommendations });
+    } catch (err) {
+      callback({ code: grpc.status.INTERNAL, message: err.message });
+    }
+  },
+});
+
+const GRPC_PORT = process.env.GRPC_PORT || 50051;
+grpcServer.bindAsync(`0.0.0.0:${GRPC_PORT}`, grpc.ServerCredentials.createInsecure(), (err, port) => {
+  if (err) return console.error('gRPC Bind Error:', err);
+  console.log(`Analytics gRPC Server running on port ${port}`);
+  grpcServer.start();
 });
 
 app.listen(PORT, '0.0.0.0', () => {

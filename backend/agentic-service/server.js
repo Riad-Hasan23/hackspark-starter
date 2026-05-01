@@ -1,6 +1,9 @@
 const express = require('express');
 const mongoose = require('mongoose');
 const axios = require('axios');
+const grpc = require('@grpc/grpc-js');
+const protoLoader = require('@grpc/proto-loader');
+const path = require('path');
 
 const app = express();
 const PORT = process.env.PORT || 8004;
@@ -9,7 +12,28 @@ const CENTRAL_API_URL = process.env.CENTRAL_API_URL;
 const CENTRAL_API_TOKEN = process.env.CENTRAL_API_TOKEN;
 const ANALYTICS_URL = process.env.ANALYTICS_SERVICE_URL || 'http://analytics-service:8003';
 const RENTAL_URL = process.env.RENTAL_SERVICE_URL || 'http://rental-service:8002';
+const ANALYTICS_GRPC_URL = process.env.ANALYTICS_GRPC_URL || 'analytics-service:50051';
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+
+// ── gRPC Client (B1) ────────────────────────────────────────────────────────
+const PROTO_PATH = path.join(__dirname, '..', 'protos', 'analytics.proto');
+const packageDefinition = protoLoader.loadSync(PROTO_PATH, {
+  keepCase: true, longs: String, enums: String, defaults: true, oneofs: true
+});
+const analyticsProto = grpc.loadPackageDefinition(packageDefinition).analytics;
+const analyticsClient = new analyticsProto.AnalyticsService(
+  ANALYTICS_GRPC_URL,
+  grpc.credentials.createInsecure()
+);
+
+function getRecommendationsGrpc(date, limit) {
+  return new Promise((resolve, reject) => {
+    analyticsClient.GetRecommendations({ date, limit }, (err, response) => {
+      if (err) return reject(err);
+      resolve(response);
+    });
+  });
+}
 
 app.use(express.json());
 
@@ -63,32 +87,37 @@ const RENTPI_KEYWORDS = [
 ];
 
 function isOnTopic(message) {
-  const lower = message.toLowerCase();
+  const lower = message.toLowerCase().trim();
+  // Allow basic greetings and pleasantries
+  const greetings = ['hello', 'hi', 'hey', 'greetings', 'morning', 'afternoon', 'evening', 'help', 'who are you', 'how are you', 'what can you do'];
+  if (greetings.some(g => lower === g || lower.startsWith(g + ' ') || lower.startsWith(g + '?') || lower.startsWith(g + '!'))) return true;
+  
   return RENTPI_KEYWORDS.some(kw => lower.includes(kw));
 }
 
 // ── Data grounding: detect intent & fetch data ──────────────────────────────
 async function groundData(message) {
   const lower = message.toLowerCase();
-  let context = '';
+  let contexts = [];
 
   try {
-    // 1. Most rented category (P15 Requirement: call Central API or Internal)
+    // 1. Most rented category
     if (lower.includes('category') && (lower.includes('most') || lower.includes('popular') || lower.includes('stats'))) {
       try {
         const data = await axios.get(`${ANALYTICS_URL}/analytics/category-stats`, { timeout: 10000 });
-        context = `Category rental stats: ${JSON.stringify(data.data?.data)}`;
+        contexts.push(`Category rental stats: ${JSON.stringify(data.data?.data)}`);
       } catch {
         const data = await axios.get(`${CENTRAL_API_URL}/api/data/rentals/stats`, {
           headers: { Authorization: `Bearer ${CENTRAL_API_TOKEN}` },
           params: { group_by: 'category' },
           timeout: 10000
         });
-        context = `Category rental stats: ${JSON.stringify(data.data?.data)}`;
+        contexts.push(`Category rental stats: ${JSON.stringify(data.data?.data)}`);
       }
     } 
-    // 2. Product availability (P15 Requirement: call rental-service)
-    else if (lower.includes('available') || lower.includes('availability')) {
+
+    // 2. Product availability
+    if (lower.includes('available') || lower.includes('availability')) {
       const idMatch = message.match(/\d+/);
       const dateMatch = message.match(/\d{4}-\d{2}-\d{2}/g);
       if (idMatch && dateMatch && dateMatch.length >= 2) {
@@ -97,64 +126,73 @@ async function groundData(message) {
             params: { from: dateMatch[0], to: dateMatch[1] },
             timeout: 10000
           });
-          context = `Availability for product ${idMatch[0]}: ${JSON.stringify(res.data)}`;
-        } catch { context = 'Availability data for this product is currently unavailable.'; }
-      } else {
-        context = 'For availability, please provide a product ID and date range (YYYY-MM-DD). Example: "Is product 42 available from 2024-03-01 to 2024-03-14?"';
+          contexts.push(`Availability for product ${idMatch[0]}: ${JSON.stringify(res.data)}`);
+        } catch { contexts.push(`Availability data for product ${idMatch[0]} is currently unavailable.`); }
       }
     } 
-    // 3. Trending / Recommendations (P15 Requirement: call analytics-service)
-    else if (lower.includes('trending') || lower.includes('recommend') || lower.includes('season')) {
+
+    // 3. Trending / Recommendations (gRPC B1)
+    if (lower.includes('trending') || lower.includes('recommend') || lower.includes('season') || lower.includes('suggest')) {
       const today = new Date().toISOString().split('T')[0];
       try {
-        const data = await axios.get(`${ANALYTICS_URL}/analytics/recommendations`, { params: { date: today, limit: 5 }, timeout: 10000 });
-        context = `Today's trending products: ${JSON.stringify(data.data?.recommendations)}`;
-      } catch { context = 'Trending recommendations are currently unavailable.'; }
+        const data = await getRecommendationsGrpc(today, 5);
+        contexts.push(`Today's trending/recommended products: ${JSON.stringify(data.recommendations)}`);
+      } catch (err) {
+        contexts.push('Trending recommendations are currently unavailable.');
+      }
     } 
-    // 4. Peak rental period (P15 Requirement: call analytics-service)
-    else if (lower.includes('peak') || lower.includes('busiest') || lower.includes('rush')) {
+
+    // 4. Peak rental period
+    if (lower.includes('peak') || lower.includes('busiest') || lower.includes('rush')) {
       try {
         const data = await axios.get(`${ANALYTICS_URL}/analytics/peak-window`, { params: { from: '2024-01', to: '2024-06' }, timeout: 10000 });
-        context = `Peak window data: ${JSON.stringify(data.data?.peakWindow)}`;
-      } catch { context = 'Peak window data is currently unavailable.'; }
-    } 
-    // 5. Rental surge days (P15 Requirement: call analytics-service)
-    else if (lower.includes('surge')) {
+        contexts.push(`Peak rental window: ${JSON.stringify(data.data?.peakWindow)}`);
+      } catch { contexts.push('Peak window data is currently unavailable.'); }
+    }
+
+    // 5. Surge Days
+    if (lower.includes('surge') || lower.includes('spike') || lower.includes('busy days')) {
       const monthMatch = message.match(/\d{4}-\d{2}/);
       const month = monthMatch ? monthMatch[0] : '2024-03';
       try {
         const data = await axios.get(`${ANALYTICS_URL}/analytics/surge-days`, { params: { month }, timeout: 10000 });
-        context = `Surge days for ${month}: ${JSON.stringify(data.data?.data?.slice(0, 10))}`;
-      } catch { context = `Surge data for ${month} is currently unavailable.`; }
+        contexts.push(`Surge days for ${month}: ${JSON.stringify(data.data?.data?.slice(0, 10))}`);
+      } catch { contexts.push(`Surge data for ${month} is currently unavailable.`); }
     } 
-    // 6. Discounts (P6 logic)
-    else if (lower.includes('discount') || lower.includes('security') || lower.includes('score')) {
-      context = 'Loyalty Discounts: 80-100 Score → 20%, 60-79 → 15%, 40-59 → 10%, 20-39 → 5%, 0-19 → 0%.';
+
+    // 6. Discounts
+    if (lower.includes('discount') || lower.includes('score') || lower.includes('cheap')) {
+      contexts.push('Loyalty Discounts: 80-100 Score → 20%, 60-79 → 15%, 40-59 → 10%, 20-39 → 5%, 0-19 → 0%.');
     }
   } catch (err) {
-    context = 'Data is currently unavailable.';
+    console.error('Grounding error:', err.message);
   }
-  return context;
+  
+  return contexts.join('\n---\n');
 }
 
-async function askLLM(messages, systemPrompt) {
-  if (!model) {
-    return 'I apologize, but the AI service is not configured. Please set up a Gemini API key.';
-  }
+async function askLLM(history, currentMessage, systemPrompt) {
+  if (!model) return 'I apologize, but the AI service is not configured.';
 
   try {
-    const prompt = systemPrompt + '\n\nConversation:\n' +
-      messages.map(m => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`).join('\n') +
-      '\nAssistant:';
+    const chat = model.startChat({
+      history: history.map(m => ({
+        role: m.role === 'user' ? 'user' : 'model',
+        parts: [{ text: m.content }],
+      })),
+      generationConfig: {
+        maxOutputTokens: 1000,
+        temperature: 0.8, // Add variety
+      },
+    });
 
-    const result = await model.generateContent(prompt);
+    const fullPrompt = `${systemPrompt}\n\nUser: ${currentMessage}`;
+    const result = await chat.sendMessage(fullPrompt);
     return result.response.text();
   } catch (err) {
     console.error('LLM error:', err.message);
-    if (err.message.includes('quota')) {
-      return 'I apologize, but my AI quota has been exceeded. Please try again in a minute or contact support.';
-    }
-    return 'I encountered an issue processing your request. Please try again in a moment.';
+    if (err.message.includes('quota')) return 'I apologize, but my AI quota has been exceeded. Please try again in a minute.';
+    return 'I encountered an issue processing your request. Please try asking again in a different way.';
   }
 }
 
@@ -179,17 +217,13 @@ app.get('/status', (req, res) => {
 app.post('/chat', async (req, res) => {
   try {
     const { sessionId, message } = req.body;
-    if (!sessionId || !message) {
-      return res.status(400).json({ error: 'sessionId and message are required' });
-    }
+    if (!sessionId || !message) return res.status(400).json({ error: 'sessionId and message are required' });
 
-    // P15: Topic guard — refuse off-topic without calling LLM
+    // P15: Topic guard
     if (!isOnTopic(message)) {
-      const reply = "I'm RentPi's assistant and I can only help with rental-related topics like products, categories, pricing, availability, discounts, and trends. Could you please ask something related to RentPi?";
-
+      const reply = "I'm RentPi's assistant and I can only help with rental-related topics. Could you please ask something about our products, categories, or pricing?";
       await Message.create({ sessionId, role: 'user', content: message });
       await Message.create({ sessionId, role: 'assistant', content: reply });
-
       let session = await Session.findOne({ sessionId });
       if (!session) {
         const name = await generateSessionName(message);
@@ -197,33 +231,30 @@ app.post('/chat', async (req, res) => {
       }
       session.lastMessageAt = new Date();
       await session.save();
-
       return res.json({ sessionId, reply });
     }
 
     // P15: Data grounding
     const context = await groundData(message);
 
-    // P16: Load conversation history
+    // P16: Load history
     const history = await Message.find({ sessionId }).sort({ timestamp: 1 }).lean();
-    const conversationMessages = history.map(m => ({ role: m.role, content: m.content }));
-    conversationMessages.push({ role: 'user', content: message });
 
-    // Build system prompt with grounded data
-    const systemPrompt = `You are RentPi's helpful assistant. RentPi is a rental marketplace for electronics, vehicles, tools, gear, and more. 
-Answer questions about rentals, products, categories, pricing, availability, discounts, and trends based ONLY on the data provided.
-If data is unavailable, say so explicitly — NEVER invent numbers or make up data.
-Be concise and helpful.
+    const systemPrompt = `You are RentPi's helpful assistant. 
+Answer questions based ONLY on the provided data. Be natural, concise, and helpful.
+If the user greets you, greet them back warmly.
+If data is missing for a specific technical query, admit it politely.
 
-${context ? `\nRelevant RentPi Data:\n${context}` : ''}`;
+Relevant RentPi Data:
+${context || 'No specific technical data found for this query.'}`;
 
-    const reply = await askLLM(conversationMessages, systemPrompt);
+    const reply = await askLLM(history, message, systemPrompt);
 
     // Save messages
     await Message.create({ sessionId, role: 'user', content: message });
     await Message.create({ sessionId, role: 'assistant', content: reply });
 
-    // P16: Handle session
+    // Handle session
     let session = await Session.findOne({ sessionId });
     if (!session) {
       const name = await generateSessionName(message);
