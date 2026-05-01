@@ -523,6 +523,64 @@ function Auth({ mode }) {
   );
 }
 
+/* ── Floating Chat Widget ─────────────────────────────────────────────────── */
+function FloatingChat() {
+  const [isOpen, setIsOpen] = useState(false);
+  const [messages, setMessages] = useState([]);
+  const [input, setInput] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [sessionId] = useState(() => Math.random().toString(36).substring(2, 15));
+  const scrollRef = useRef();
+
+  useEffect(() => {
+    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+  }, [messages, loading, isOpen]);
+
+  const send = async (e) => {
+    e.preventDefault();
+    if (!input.trim() || loading) return;
+    const msg = input; setInput('');
+    setMessages(prev => [...prev, { role: 'user', content: msg }]);
+    setLoading(true);
+    try {
+      const data = await api.chatSend(sessionId, msg);
+      setMessages(prev => [...prev, { role: 'assistant', content: data.reply }]);
+    } catch {
+      setMessages(prev => [...prev, { role: 'assistant', content: 'Offline mode active.' }]);
+    } finally { setLoading(false); }
+  };
+
+  return (
+    <div className={`floating-chat ${isOpen ? 'open' : ''}`}>
+      {isOpen ? (
+        <div className="chat-window">
+          <div className="chat-header">
+            <span>RentPi Assistant</span>
+            <button onClick={() => setIsOpen(false)}>×</button>
+          </div>
+          <div className="chat-messages" ref={scrollRef}>
+            {messages.length === 0 && <p className="empty-msg">How can I help you with RentPi today?</p>}
+            {messages.map((m, i) => (
+              <div key={i} className={`message ${m.role}`}>
+                <div className="bubble">{m.content}</div>
+              </div>
+            ))}
+            {loading && <div className="message assistant"><div className="bubble typing">...</div></div>}
+          </div>
+          <form className="chat-input" onSubmit={send}>
+            <input placeholder="Ask me anything..." value={input} onChange={e => setInput(e.target.value)} />
+            <button disabled={loading}>→</button>
+          </form>
+        </div>
+      ) : (
+        <button className="chat-toggle" onClick={() => setIsOpen(true)}>
+          💬
+        </button>
+      )}
+    </div>
+  );
+}
+
 /* ── App Shell ─────────────────────────────────────────────────────────────── */
 export default function App() {
   return (
@@ -542,6 +600,7 @@ export default function App() {
           <Route path="/profile" element={<Profile />} />
           <Route path="*" element={<Navigate to="/" />} />
         </Routes>
+        <FloatingChat />
       </AuthProvider>
     </BrowserRouter>
   );

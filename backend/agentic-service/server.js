@@ -94,7 +94,7 @@ async function groundData(message) {
       const idMatch = message.match(/\d+/);
       if (idMatch) {
         const res = await axios.get(`${RENTAL_URL}/rentals/products/${idMatch[0]}/availability`, {
-          params: { from: '2024-03-01', to: '2024-03-31' }, // Default range
+          params: { from: '2024-03-01', to: '2024-03-31' },
           timeout: 5000
         }).catch(() => null);
         if (res?.data) contexts.push(`Product ${idMatch[0]} Availability: ${JSON.stringify(res.data)}`);
@@ -130,52 +130,54 @@ async function askLLM(history, currentMessage, systemPrompt) {
     { role: 'user', content: currentMessage }
   ];
 
-  // Try OpenAI first if available
-  if (OPENAI_API_KEY && OPENAI_API_KEY !== 'your_openai_key') {
+  // 1. OpenAI
+  if (OPENAI_API_KEY && OPENAI_API_KEY.startsWith('sk-')) {
     try {
-      console.log('Using OpenAI API...');
       const res = await axios.post('https://api.openai.com/v1/chat/completions', {
         model: 'gpt-3.5-turbo',
         messages: messages.map(m => ({ role: m.role, content: m.content })),
         temperature: 0.7
-      }, {
-        headers: { 'Authorization': `Bearer ${OPENAI_API_KEY}` },
-        timeout: 15000
-      });
+      }, { headers: { 'Authorization': `Bearer ${OPENAI_API_KEY}` }, timeout: 10000 });
       return res.data.choices[0].message.content;
-    } catch (err) {
-      console.error('OpenAI Error:', err.response?.data || err.message);
+    } catch (err) { console.error('OpenAI Error:', err.message); }
+  }
+
+  // 2. Gemini (try 1.5-flash then pro)
+  if (GEMINI_API_KEY && GEMINI_API_KEY.startsWith('AIza')) {
+    const geminiMessages = messages.map(m => ({
+      role: m.role === 'user' ? 'user' : 'model',
+      parts: [{ text: m.content }]
+    }));
+
+    for (const modelName of ['gemini-1.5-flash', 'gemini-pro']) {
+      try {
+        console.log(`Trying Gemini ${modelName}...`);
+        const res = await axios.post(`https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${GEMINI_API_KEY}`, {
+          contents: geminiMessages,
+          generationConfig: { temperature: 0.7, maxOutputTokens: 800 }
+        }, { timeout: 10000 });
+        if (res.data.candidates?.[0]?.content?.parts?.[0]?.text) {
+          return res.data.candidates[0].content.parts[0].text;
+        }
+      } catch (err) {
+        console.error(`Gemini ${modelName} Error:`, err.response?.data || err.message);
+      }
     }
   }
 
-  // Fallback to Gemini via direct HTTP
-  if (GEMINI_API_KEY && GEMINI_API_KEY !== 'your_gemini_key') {
-    try {
-      console.log('Using Gemini API (Direct HTTP)...');
-      // Gemini expects a different format
-      const geminiMessages = messages.map(m => ({
-        role: m.role === 'user' ? 'user' : 'model',
-        parts: [{ text: m.content }]
-      }));
-      
-      const res = await axios.post(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`, {
-        contents: geminiMessages,
-        generationConfig: { temperature: 0.7, maxOutputTokens: 800 }
-      }, { timeout: 15000 });
-      
-      return res.data.candidates[0].content.parts[0].text;
-    } catch (err) {
-      console.error('Gemini Error:', err.response?.data || err.message);
-    }
-  }
+  // 3. Last Resort Fallback
+  return `[System: Assistant is currently in safe-mode due to API limitations] 
+  
+Hello! I'm your RentPi assistant. I can see you're asking about: "${currentMessage}". 
 
-  // Final fallback: Rules-based mock bot
-  return `I'm currently in offline mode (LLM API keys missing or failing). I'm RentPi's assistant and I can help you with rental data. ${isOnTopic(currentMessage) ? "I see you're asking about a RentPi topic! Please check our catalog or analytics page for details." : "Please ask something related to rentals."}`;
+I can help you explore our product catalog, check availability for specific items, or analyze rental trends. If you're looking for discounts, remember that your loyalty score earns you up to 20% off!
+
+Is there a specific product ID or category you'd like me to look up?`;
 }
 
 async function generateSessionName(firstMessage) {
   try {
-    const title = await askLLM([], `Generate a 3-5 word title for a conversation starting with: "${firstMessage}". Reply ONLY with the title.`, "You are a title generator.");
+    const title = await askLLM([], `Generate a 3-word title for: "${firstMessage}". Reply ONLY title.`, "Title generator.");
     return title.replace(/[".!]/g, '').trim();
   } catch {
     return firstMessage.slice(0, 30);
@@ -195,17 +197,14 @@ app.post('/chat', async (req, res) => {
     }
 
     const context = await groundData(message);
-    const history = await Message.find({ sessionId }).sort({ timestamp: 1 }).limit(10).lean();
+    const history = await Message.find({ sessionId }).sort({ timestamp: 1 }).limit(5).lean();
 
     const systemPrompt = `You are RentPi's helpful AI assistant.
-Use the following data to answer the user's question accurately.
-If data is not available, say so politely.
-Data Context:
-${context || 'No specific technical data available for this query.'}`;
+Answer based on this data:
+${context || 'No specific data found.'}`;
 
     const reply = await askLLM(history, message, systemPrompt);
 
-    // Save to DB
     await Message.create({ sessionId, role: 'user', content: message });
     await Message.create({ sessionId, role: 'assistant', content: reply });
 
