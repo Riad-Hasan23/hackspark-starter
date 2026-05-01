@@ -439,7 +439,7 @@ input:focus, select:focus, textarea:focus {
 .chat-window {
   width: 350px; height: 450px; background: var(--bg-card); border-radius: var(--radius);
   border: 1px solid var(--primary-glow); box-shadow: 0 8px 32px rgba(0,0,0,0.3);
-  display: flex; flexDirection: column; overflow: hidden;
+  display: flex; flex-direction: column; overflow: hidden;
   position: absolute; bottom: 80px; right: 0; animation: slideIn 0.3s ease-out;
 }
 @keyframes slideIn { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
