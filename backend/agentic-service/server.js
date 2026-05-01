@@ -124,65 +124,37 @@ async function groundData(message) {
 
 // ── Multi-Provider LLM Wrapper ───────────────────────────────────────────────
 async function askLLM(history, currentMessage, systemPrompt) {
-  const messages = [
-    { role: 'system', content: systemPrompt },
-    ...history.map(m => ({ role: m.role === 'user' ? 'user' : 'assistant', content: m.content })),
-    { role: 'user', content: currentMessage }
-  ];
-
-  // 1. OpenAI or Groq (Free & Fast Alternative)
-  if (OPENAI_API_KEY && (OPENAI_API_KEY.startsWith('sk-') || OPENAI_API_KEY.startsWith('gsk_'))) {
-    try {
-      const isGroq = OPENAI_API_KEY.startsWith('gsk_');
-      const url = isGroq ? 'https://api.groq.com/openai/v1/chat/completions' : 'https://api.openai.com/v1/chat/completions';
-      const modelToUse = isGroq ? 'llama3-70b-8192' : 'gpt-3.5-turbo';
-
-      const res = await axios.post(url, {
-        model: modelToUse,
-        messages: messages.map(m => ({ role: m.role, content: m.content })),
-        temperature: 0.7
-      }, { headers: { 'Authorization': `Bearer ${OPENAI_API_KEY}` }, timeout: 10000 });
-      return res.data.choices[0].message.content;
-    } catch (err) { console.error('OpenAI/Groq Error:', err.response?.data || err.message); }
+  const Anthropic = require('@anthropic-ai/sdk');
+let anthropicClient = null;
+try {
+  if (process.env.ANTHROPIC_API_KEY) {
+    anthropicClient = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+    console.log('Anthropic AI initialized');
   }
+} catch (err) {
+  console.error('Failed to initialize Anthropic:', err.message);
+}
 
-  // 2. Gemini (try 1.5-flash then pro)
-  if (GEMINI_API_KEY && GEMINI_API_KEY.startsWith('AIza')) {
-    const geminiMessages = [
-      ...history.map(m => ({
-        role: m.role === 'user' ? 'user' : 'model',
-        parts: [{ text: m.content }]
-      })),
-      {
-        role: 'user',
-        parts: [{ text: `[System Instructions]\n${systemPrompt}\n\n[User Query]\n${currentMessage}` }]
-      }
-    ];
-
-    for (const modelName of ['gemini-1.5-flash', 'gemini-pro']) {
-      try {
-        console.log(`Trying Gemini ${modelName}...`);
-        const res = await axios.post(`https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${GEMINI_API_KEY}`, {
-          contents: geminiMessages,
-          generationConfig: { temperature: 0.7, maxOutputTokens: 800 }
-        }, { timeout: 10000 });
-        if (res.data.candidates?.[0]?.content?.parts?.[0]?.text) {
-          return res.data.candidates[0].content.parts[0].text;
-        }
-      } catch (err) {
-        console.error(`Gemini ${modelName} Error:`, err.response?.data || err.message);
-      }
-    }
+async function askLLM(messages, systemPrompt) {
+  if (!anthropicClient) {
+    return 'AI service not configured.';
   }
-
-  // 3. Last Resort Fallback
-  return `[System: Assistant is currently in safe-mode due to API limitations] 
-  
-Hello! I'm your RentPi assistant. I can see you're asking about: "${currentMessage}". 
-
-I can help you explore our product catalog, check availability for specific items, or analyze rental trends. If you're looking for discounts, remember that your loyalty score earns you up to 20% off!
-
-Is there a specific product ID or category you'd like me to look up?`;
+  try {
+    const response = await anthropicClient.messages.create({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 1024,
+      system: systemPrompt,
+      messages: messages.map(m => ({
+        role: m.role === 'assistant' ? 'assistant' : 'user',
+        content: m.content
+      }))
+    });
+    return response.content[0].text;
+  } catch (err) {
+    console.error('LLM error:', err.message);
+    return 'I encountered an issue. Please try again.';
+  }
+}
 }
 
 async function generateSessionName(firstMessage) {

@@ -146,6 +146,7 @@ services:
     ports:
       - "${AGENTIC_SERVICE_PORT:-8004}:8004"
     environment:
+      ANTHROPIC_API_KEY:     ${ANTHROPIC_API_KEY}
       PORT:                  8004
       MONGO_URI:             ${MONGO_URI}
       CENTRAL_API_URL:       ${CENTRAL_API_URL}
